@@ -138,7 +138,9 @@ Optional auf einem verbundenen Android-Gerät installieren:
 
 Ohne `-Serial` muss genau ein autorisiertes Gerät verbunden sein. Das Skript nutzt
 `adb install -r`. Ein Signaturkonflikt wird als Fehler ausgegeben; es deinstalliert
-die vorhandene App nicht automatisch.
+die vorhandene App nicht automatisch. Bei APKs aus GitHub Actions die Datei
+`release-info.json` neben der APK aufbewahren; das Installationsskript prüft damit
+die APK-Prüfsumme.
 
 ## Cache-Verhalten
 
@@ -203,9 +205,9 @@ bash -n build.sh
 python3 -m unittest discover -s tests -v
 ```
 
-GitHub Actions führt diese Tests und eine Syntaxprüfung der PowerShell-Skripte
-aus. Ein kompletter App-Build läuft lokal über dieselben Skripte und wird wegen
-Toolchain-Größe und Signierschlüsseln nicht automatisch bei jedem Push ausgeführt.
+Im Builder-Repository führt GitHub Actions bei jedem Push diese Tests und eine
+Syntaxprüfung der PowerShell-Skripte aus. Der vollständige automatische APK-Build
+wird vom separaten Workflow im App-Repository ausgelöst.
 
 Grundlagen: [Docker-Volumes](https://docs.docker.com/engine/storage/volumes/),
 [festgelegte Basis-Images](https://docs.docker.com/build/building/best-practices/#pin-base-image-versions).

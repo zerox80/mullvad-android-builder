@@ -9,9 +9,14 @@ $ErrorActionPreference = 'Stop'
 $adb = Join-Path $AndroidSdk 'platform-tools\adb.exe'
 $apkPath = (Resolve-Path -LiteralPath $Apk).Path
 $signingPath = "$apkPath.signing-info.json"
-if (-not (Test-Path -LiteralPath $signingPath)) { throw 'Sign with Sign-Apk.ps1 first; signing metadata is missing.' }
+if (-not (Test-Path -LiteralPath $signingPath)) {
+    $signingPath = Join-Path (Split-Path $apkPath -Parent) 'release-info.json'
+}
+if (-not (Test-Path -LiteralPath $signingPath)) { throw 'Signing metadata is missing; keep release-info.json with downloaded APKs.' }
 $signing = Get-Content -LiteralPath $signingPath -Raw | ConvertFrom-Json
-if ($signing.apkSha256 -ne (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
+if (($signing.PSObject.Properties.Name -contains 'signed') -and -not $signing.signed) { throw 'Release metadata describes an unsigned APK.' }
+if ($signing.apk -ne [IO.Path]::GetFileName($apkPath) -or
+    $signing.apkSha256 -ne (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
     throw 'APK checksum does not match its signing metadata.'
 }
 $devices = & $adb devices
