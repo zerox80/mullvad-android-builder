@@ -11,6 +11,7 @@ arch=arm64
 mode=build
 offline=false
 workers=4
+heap_mb=4096
 cache_dir=
 
 usage() {
@@ -23,6 +24,7 @@ Usage: bash build.sh [options]
   --out DIR          Artifact directory (default: ./artifacts).
   --cache-dir DIR    Bind caches to a host directory (for GitHub Actions).
   --workers N        Gradle and Cargo parallelism, 1-32 (default: 4).
+  --heap-mb N        Gradle heap in MiB, 1024-16384 (default: 4096).
   --check            Check toolchain and Gradle task graph; no APK build.
   --offline          Disable container networking; require cached dependencies.
   --doctor           Print installed toolchain versions; no source checkout.
@@ -42,6 +44,7 @@ while (($#)); do
     --out) need_value "$@"; output_dir=$2; shift 2 ;;
     --cache-dir) need_value "$@"; cache_dir=$2; shift 2 ;;
     --workers) need_value "$@"; workers=$2; shift 2 ;;
+    --heap-mb) need_value "$@"; heap_mb=$2; shift 2 ;;
     --check) mode=check; shift ;;
     --doctor) mode=doctor; shift ;;
     --offline) offline=true; shift ;;
@@ -52,6 +55,7 @@ done
 [[ $arch == arm64 || $arch == all ]] || { echo 'Architecture must be arm64 or all.' >&2; exit 2; }
 prefix=${CACHE_PREFIX:-mullvad-builder-$arch}
 [[ $workers =~ ^([1-9]|[12][0-9]|3[0-2])$ ]] || { echo 'Workers must be 1-32.' >&2; exit 2; }
+[[ $heap_mb =~ ^[0-9]{4,5}$ && $heap_mb -ge 1024 && $heap_mb -le 16384 ]] || { echo 'Heap must be 1024-16384 MiB.' >&2; exit 2; }
 command -v docker >/dev/null || { echo 'Docker is required. On Windows run Build.ps1 with WSL/Ubuntu.' >&2; exit 1; }
 [[ $(docker info --format '{{.OSType}}') == linux ]] || { echo 'Use a Linux Docker engine.' >&2; exit 1; }
 base=$(tr -d '\r\n' < "$root/base-image.txt")
@@ -96,6 +100,6 @@ if [[ -n $source_dir ]]; then
   if ! $ref_set; then ref=HEAD; fi
 fi
 if $offline; then args+=(--network none --env CARGO_NET_OFFLINE=true); fi
-command_args=("$mode" --repo "$repo" --ref "$ref" --arch "$arch" --workers "$workers")
+command_args=("$mode" --repo "$repo" --ref "$ref" --arch "$arch" --workers "$workers" --heap-mb "$heap_mb")
 if $offline; then command_args+=(--offline); fi
 exec docker "${args[@]}" "$image" "${command_args[@]}"

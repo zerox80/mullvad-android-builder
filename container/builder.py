@@ -204,7 +204,7 @@ def build(args):
             say(name + ": " + str(value))
         command = ["bash", "./android/gradlew", "-p", "android", "--console", "plain",
                    "--no-daemon", "--max-workers=" + str(args.workers),
-                   "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m",
+                   "-Dorg.gradle.jvmargs=-Xmx" + str(args.heap_mb) + "m -XX:MaxMetaspaceSize=1024m",
                    "-Pkotlin.compiler.execution.strategy=in-process",
                    "-Pmullvad.app.build.cargo.targets=" + ("arm64" if args.arch == "arm64" else "arm,arm64,x86,x86_64"),
                    "-Pmullvad.app.build.cargo.cleanBuild=false"]
@@ -252,6 +252,7 @@ def main():
     parser.add_argument("--arch", choices=ARCHITECTURES, default="arm64")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--workers", type=int, choices=range(1, 33), default=4)
+    parser.add_argument("--heap-mb", type=int, choices=range(1024, 16385), default=4096)
     parser.add_argument("--apk")
     parser.add_argument("--keystore", default="/run/secrets/release.p12")
     parser.add_argument("--alias", default="release")

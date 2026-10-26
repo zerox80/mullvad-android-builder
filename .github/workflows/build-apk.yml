@@ -1,0 +1,102 @@
+name: Android APK bauen
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: App-Branch, Tag oder Commit
+        required: true
+        default: android-pause-vpn
+        type: string
+permissions:
+  contents: read
+jobs:
+  release-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the builder
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: builder
+          persist-credentials: false
+      - name: Check out the selected application version
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zerox80/mullvadvpn-app
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record the source commit
+        id: source
+        run: echo "commit=$(git -C source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Make room for the Android and Rust toolchain
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
+      - name: Restore build caches
+        id: cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/mullvad-builder
+          key: ${{ runner.os }}-mullvad-arm64-v1-${{ hashFiles('source/building/android-container-image.txt', 'source/Cargo.lock', 'source/android/gradle/libs.versions.toml') }}-${{ steps.source.outputs.commit }}
+          restore-keys: |
+            ${{ runner.os }}-mullvad-arm64-v1-${{ hashFiles('source/building/android-container-image.txt', 'source/Cargo.lock', 'source/android/gradle/libs.versions.toml') }}-
+      - name: Build and validate the release APK
+        id: build
+        env:
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+        run: |
+          bash builder/build.sh --source "$GITHUB_WORKSPACE/source" --ref "$SOURCE_COMMIT" \
+            --workers 2 --heap-mb 3072 \
+            --cache-dir "$HOME/.cache/mullvad-builder" --out "$GITHUB_WORKSPACE/artifacts"
+      - name: Sign and verify the APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" && test -n "$ANDROID_KEYSTORE_PASSWORD"
+          key="$RUNNER_TEMP/mullvad-release.p12"
+          trap 'rm -f -- "$key"' EXIT
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$key"
+          mapfile -t apks < <(find "$GITHUB_WORKSPACE/artifacts" -name '*-release-unsigned.apk' -type f)
+          test "${#apks[@]}" -eq 1
+          directory=$(dirname -- "${apks[0]}")
+          filename=$(basename -- "${apks[0]}")
+          docker run --rm --network none \
+            --mount "type=bind,source=$directory,target=/artifacts" \
+            --mount "type=bind,source=$key,target=/run/secrets/release.p12,readonly" \
+            --env ANDROID_KEYSTORE_PASSWORD \
+            mullvad-android-builder:local sign --apk "/artifacts/$filename"
+      - name: Upload installable APK and provenance
+        id: apk
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: MullvadVPN-arm64-${{ steps.source.outputs.commit }}
+          path: |
+            artifacts/**/release/*
+            artifacts/**/build-info.json
+            artifacts/**/build.log
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build summary
+        env:
+          ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+        run: |
+          printf 'Signed ARM64 release APK for commit `%s`.\n\n[Download APK artifact](%s)\n' \
+            "$SOURCE_COMMIT" "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Allow the runner to save cache files
+        if: always()
+        run: |
+          if [ -d "$HOME/.cache/mullvad-builder" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache/mullvad-builder"
+          fi
+      - name: Save successful compilation caches
+        if: always() && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/mullvad-builder
+          key: ${{ steps.cache.outputs.cache-primary-key }}

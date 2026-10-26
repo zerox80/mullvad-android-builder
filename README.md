@@ -168,6 +168,28 @@ Rust-/Gradle-Lockfiles aus dem gewählten App-Commit bleiben maßgeblich.
 
 ## Automatische APKs mit GitHub Actions
 
+### Manuell starten
+
+Im Builder-Repository **Actions → Android APK bauen → Run workflow** öffnen.
+Den Builder-Branch auf `main` lassen und im Feld `source_ref` den App-Branch
+`android-pause-vpn`, einen Tag oder einen exakten Commit eintragen. Danach
+**Run workflow** klicken. Nach erfolgreichem Lauf die signierte APK unter
+**Artifacts → MullvadVPN-arm64-…** herunterladen.
+
+Direktlink: [Android APK bauen](https://github.com/zerox80/mullvad-android-builder/actions/workflows/build-apk.yml).
+
+Per GitHub CLI:
+
+```bash
+gh workflow run build-apk.yml --repo zerox80/mullvad-android-builder --ref main -f source_ref=android-pause-vpn
+```
+
+Für den manuellen Workflow sind die beiden Release-Signing-Secrets auch im
+Builder-Repository eingerichtet. Er braucht dort keinen zusätzlichen SSH-Key.
+Er nutzt zwei Worker und 3 GiB Gradle-Heap für kleinere private GitHub-Runner.
+
+### Automatisch bei neuen App-Commits
+
 Der Workflow `examples/android-pause-apk.yml` gehört in das App-Repository unter
 `.github/workflows/`. Bei jedem Push auf `android-pause-vpn` baut er genau den
 auslösenden Commit auf einem GitHub-Runner. Der private Builder wird über einen
