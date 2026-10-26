@@ -1,0 +1,14 @@
+/artifacts/
+/secrets/
+*.apk
+*.aab
+*.idsig
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.dpapi
+*.env
+*.log
+__pycache__/
+*.pyc

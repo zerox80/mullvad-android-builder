@@ -1,0 +1,95 @@
+name: Android - Signed pause VPN APK
+on:
+  push:
+    branches: [android-pause-vpn]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact application commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the private builder
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zerox80/mullvad-android-builder
+          ref: main
+          path: builder
+          ssh-key: ${{ secrets.MULLVAD_BUILDER_SSH_KEY }}
+          persist-credentials: false
+      - name: Make room for the Android and Rust toolchain
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
+      - name: Restore build caches
+        id: cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/mullvad-builder
+          key: ${{ runner.os }}-mullvad-arm64-v1-${{ hashFiles('source/building/android-container-image.txt', 'source/Cargo.lock', 'source/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-mullvad-arm64-v1-${{ hashFiles('source/building/android-container-image.txt', 'source/Cargo.lock', 'source/android/gradle/libs.versions.toml') }}-
+      - name: Build and validate the release APK
+        id: build
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          bash builder/build.sh --source "$GITHUB_WORKSPACE/source" --ref "$SOURCE_COMMIT" \
+            --cache-dir "$HOME/.cache/mullvad-builder" --out "$GITHUB_WORKSPACE/artifacts"
+      - name: Sign and verify the APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" && test -n "$ANDROID_KEYSTORE_PASSWORD"
+          key="$RUNNER_TEMP/mullvad-release.p12"
+          trap 'rm -f -- "$key"' EXIT
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$key"
+          mapfile -t apks < <(find "$GITHUB_WORKSPACE/artifacts" -name '*-release-unsigned.apk' -type f)
+          test "${#apks[@]}" -eq 1
+          directory=$(dirname -- "${apks[0]}")
+          filename=$(basename -- "${apks[0]}")
+          docker run --rm --network none \
+            --mount "type=bind,source=$directory,target=/artifacts" \
+            --mount "type=bind,source=$key,target=/run/secrets/release.p12,readonly" \
+            --env ANDROID_KEYSTORE_PASSWORD \
+            mullvad-android-builder:local sign --apk "/artifacts/$filename"
+      - name: Upload installable APK and provenance
+        id: apk
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: MullvadVPN-arm64-${{ github.sha }}
+          path: |
+            artifacts/**/release/*
+            artifacts/**/build-info.json
+            artifacts/**/build.log
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build summary
+        env:
+          ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          printf 'Signed ARM64 release APK for commit `%s`.\n\n[Download APK artifact](%s)\n' \
+            "$SOURCE_COMMIT" "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Allow the runner to save cache files
+        if: always()
+        run: |
+          if [ -d "$HOME/.cache/mullvad-builder" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache/mullvad-builder"
+          fi
+      - name: Save successful compilation caches
+        if: always() && steps.build.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/mullvad-builder
+          key: ${{ steps.cache.outputs.cache-primary-key }}
