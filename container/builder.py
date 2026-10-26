@@ -252,11 +252,13 @@ def main():
     parser.add_argument("--arch", choices=ARCHITECTURES, default="arm64")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--workers", type=int, choices=range(1, 33), default=4)
-    parser.add_argument("--heap-mb", type=int, choices=range(1024, 16385), default=4096)
+    parser.add_argument("--heap-mb", type=int, default=4096, help="Gradle heap in MiB (1024-16384)")
     parser.add_argument("--apk")
     parser.add_argument("--keystore", default="/run/secrets/release.p12")
     parser.add_argument("--alias", default="release")
     args = parser.parse_args()
+    if not 1024 <= args.heap_mb <= 16384:
+        parser.error("--heap-mb must be between 1024 and 16384")
     if args.offline:
         os.environ["CARGO_NET_OFFLINE"] = "true"
     if args.command == "doctor":
